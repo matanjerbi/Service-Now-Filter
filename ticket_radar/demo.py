@@ -1,16 +1,20 @@
-"""Generate realistic-looking demo tickets so the UI can be explored offline."""
+"""Generate realistic-looking demo tickets so the UI can be explored without ServiceNow."""
+# ruff: noqa: E501  (long Hebrew demo strings)
+from __future__ import annotations
+
 import random
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
-import db as dbm
+from .servicenow.models import Ticket
+from .storage import TicketRepository
 
 HOSTS = ["redis-prd-01", "redis-prd-02", "redis-stg-03", "pg-prd-11", "pg-prd-12", "k8s-node-07",
          "app-srv-21", "nfs-04", "lb-ext-02", "vault-01"]
 CLUSTERS = ["payments", "sessions", "catalog", "auth-cache", "analytics", "orders"]
 TEAMS = ["Billing", "Mobile", "Search", "Data", "Platform", "CRM"]
 
-G = {
+TEMPLATES_BY_GROUP = {
     "DBA - Redis": [
         ("Redis cluster {cl} - high memory usage on shard {n}",
          "used_memory reached 92% of maxmemory on {h}. Evictions started. "
@@ -67,44 +71,51 @@ RESOLUTIONS = [
 ]
 TABLES = [("incident", "INC", 0.55), ("sc_req_item", "RITM", 0.25), ("change_request", "CHG", 0.12),
           ("problem", "PRB", 0.08)]
-PRIOS = ["1 - Critical", "2 - High", "3 - Moderate", "4 - Low"]
+PRIORITIES = ["1 - Critical", "2 - High", "3 - Moderate", "4 - Low"]
 PEOPLE = ["Matan Jerbi", "Noa Levi", "Yossi Cohen", "Dana Mizrahi", "Avi Peretz", "Shira Katz", ""]
 OPEN_STATES = ["New", "In Progress", "On Hold"]
 CLOSED_STATES = ["Resolved", "Closed", "Closed Complete"]
 
 
-def generate(path, n=1800, seed=7):
+def generate(repo: TicketRepository, count: int = 1800, seed: int = 7) -> int:
+    """Insert `count` synthetic tickets into `repo`. Deterministic for a given seed."""
     rnd = random.Random(seed)
-    now = datetime.now(timezone.utc)
-    rows, counters = [], {p: 10000 for _, p, _ in TABLES}
-    groups = list(G.keys())
-    gw = [5, 3, 3, 2, 2, 3, 1, 0.3]
-    for _ in range(n):
-        tbl, pre, _ = rnd.choices(TABLES, weights=[w for *_, w in TABLES])[0]
-        counters[pre] += rnd.randint(1, 3)
-        g = rnd.choices(groups, weights=gw)[0]
-        title_t, desc_t = rnd.choice(G[g])
-        ctx = dict(cl=rnd.choice(CLUSTERS), n=rnd.randint(2, 9), h=rnd.choice(HOSTS), t=rnd.choice(TEAMS))
+    now = datetime.now(UTC)
+    counters = {prefix: 10_000 for _, prefix, _ in TABLES}
+    groups = list(TEMPLATES_BY_GROUP)
+    group_weights = [5, 3, 3, 2, 2, 3, 1, 0.3]
+    fmt = "%Y-%m-%d %H:%M:%S"
+    tickets: list[Ticket] = []
+    for _ in range(count):
+        table, prefix, _w = rnd.choices(TABLES, weights=[w for *_, w in TABLES])[0]
+        counters[prefix] += rnd.randint(1, 3)
+        group = rnd.choices(groups, weights=group_weights)[0]
+        title_t, desc_t = rnd.choice(TEMPLATES_BY_GROUP[group])
+        ctx = {"cl": rnd.choice(CLUSTERS), "n": rnd.randint(2, 9), "h": rnd.choice(HOSTS), "t": rnd.choice(TEAMS)}
         created = now - timedelta(days=rnd.random() ** 1.4 * 365, minutes=rnd.randint(0, 1440))
         age = (now - created).days
         active = rnd.random() < (0.75 if age < 7 else 0.3 if age < 30 else 0.04)
-        updated = created + timedelta(hours=rnd.randint(1, 24 * min(age + 1, 20)))
-        updated = min(updated, now)
-        fmt = "%Y-%m-%d %H:%M:%S"
-        rows.append({
-            "sys_id": uuid.UUID(int=rnd.getrandbits(128)).hex, "tbl": tbl, "sys_class": tbl,
-            "number": f"{pre}{counters[pre]:07d}",
-            "short_description": title_t.format(**ctx), "description": desc_t.format(**ctx),
-            "state": rnd.choice(OPEN_STATES if active else CLOSED_STATES),
-            "priority": rnd.choices(PRIOS, weights=[1, 3, 8, 4])[0], "active": 1 if active else 0,
-            "group_id": "", "group_name": g, "assigned_to": rnd.choice(PEOPLE),
-            "opened_by": rnd.choice(PEOPLE[:-1]), "category": "", "cmdb_ci": ctx["h"],
-            "close_notes": "" if active else ("נפתחה הרשאה כמבוקש." if "הרשא" in title_t
-                                              else rnd.choice(RESOLUTIONS)), "journal": "",
-            "created_on": created.strftime(fmt), "updated_on": updated.strftime(fmt),
-            "closed_at": "" if active else updated.strftime(fmt),
-        })
-    conn = dbm.connect(path)
-    dbm.upsert(conn, rows)
-    dbm.set_meta(conn, "last_sync", now.strftime("%Y-%m-%d %H:%M:%S"))
-    conn.close()
+        updated = min(created + timedelta(hours=rnd.randint(1, 24 * min(age + 1, 20))), now)
+        resolution = "" if active else ("נפתחה הרשאה כמבוקש." if "הרשא" in title_t else rnd.choice(RESOLUTIONS))
+        tickets.append(Ticket(
+            sys_id=uuid.UUID(int=rnd.getrandbits(128)).hex,
+            table=table,
+            sys_class=table,
+            number=f"{prefix}{counters[prefix]:07d}",
+            short_description=title_t.format(**ctx),
+            description=desc_t.format(**ctx),
+            state=rnd.choice(OPEN_STATES if active else CLOSED_STATES),
+            priority=rnd.choices(PRIORITIES, weights=[1, 3, 8, 4])[0],
+            active=active,
+            group_name=group,
+            assigned_to=rnd.choice(PEOPLE),
+            opened_by=rnd.choice(PEOPLE[:-1]),
+            cmdb_ci=ctx["h"],
+            close_notes=resolution,
+            created_on=created.strftime(fmt),
+            updated_on=updated.strftime(fmt),
+            closed_at="" if active else updated.strftime(fmt),
+        ))
+    saved = repo.upsert_many(tickets)
+    repo.mark_synced()
+    return saved

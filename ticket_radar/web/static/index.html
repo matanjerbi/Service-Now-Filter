@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ticket Radar · ServiceNow</title>
+<link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="top-row">
+    <div class="logo">
+      <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2"><circle cx="16" cy="16" r="13" opacity=".35"/><circle cx="16" cy="16" r="8" opacity=".6"/><circle cx="16" cy="16" r="2.5" fill="currentColor"/><path d="M16 16 L26 8" stroke-linecap="round"/></svg>
+      <div>Ticket Radar<small>חיפוש וניתוח טיקטים מ-ServiceNow</small></div>
+    </div>
+    <div class="spacer"></div>
+    <div class="chip-status" id="status"><span class="dot warn"></span> טוען…</div>
+    <button class="btn ghost-light" id="btnExport" title="ייצוא התוצאות הנוכחיות ל-CSV (נפתח ב-Excel)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 17v3h16v-3"/></svg> ייצוא</button>
+    <button class="btn primary" id="btnSync">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 11a8 8 0 0 0-14.9-3M4 4v4h4M4 13a8 8 0 0 0 14.9 3M20 20v-4h-4"/></svg> סנכרון</button>
+  </div>
+</header>
+
+<div class="search-wrap">
+  <div class="search-card">
+    <div class="search-row">
+      <div class="search-box">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+        <input id="q" placeholder="תאר את התקלה או הדבק הודעת שגיאה, שם שרת, מספר טיקט…" autocomplete="off" dir="auto">
+        <span class="kbd">/</span>
+      </div>
+      <div class="seg" id="mode" title="אופן ההתאמה">
+        <button data-v="smart" class="on" title="כל המילים, ואם אין מספיק תוצאות – טיקטים דומים לפי רלוונטיות">חכם</button>
+        <button data-v="all" title="רק טיקטים שמכילים את כל המילים">כל המילים</button>
+        <button data-v="any" title="כל טיקט שמכיל לפחות מילה אחת, מדורג לפי רלוונטיות">דומה</button>
+      </div>
+    </div>
+    <div class="hint">טיפים: <code>"too many connections"</code> לביטוי מדויק · <code>-VPN</code> להוצאת מילה · <code>INC0012345</code> לקפיצה למספר · חיפוש בעברית מתעלם מאותיות ו/ה/ב/ל/מ/ש/כ בתחילת מילה</div>
+    <div class="filters">
+      <div class="fgroup"><span class="flabel">נפתח</span>
+        <input type="date" id="from"> <span class="muted">עד</span> <input type="date" id="to">
+        <span class="pill" data-range="7">7 ימים</span><span class="pill" data-range="30">30 יום</span>
+        <span class="pill" data-range="90">רבעון</span><span class="pill" data-range="365">שנה</span><span class="pill" data-range="0">הכל</span>
+      </div>
+      <div class="fgroup"><span class="flabel">סטטוס</span>
+        <div class="seg" id="status-seg">
+          <button data-v="" class="on">הכל<span class="n" id="n-all"></span></button>
+          <button data-v="open">פתוחים<span class="n" id="n-open"></span></button>
+          <button data-v="closed">סגורים<span class="n" id="n-closed"></span></button>
+        </div>
+      </div>
+      <div class="fgroup"><span class="flabel">סוג</span><span id="types"></span></div>
+      <div class="fgroup"><span class="flabel">עדיפות</span><span id="prios"></span></div>
+    </div>
+  </div>
+</div>
+
+<div class="layout">
+  <aside class="panel side">
+    <div class="side-h"><h3>צוותים <span class="muted" id="gcount"></span></h3><a id="gclear" hidden>נקה בחירה</a></div>
+    <input class="side-search" id="gq" placeholder="סינון צוותים…">
+    <div class="glist" id="groups"></div>
+  </aside>
+
+  <main>
+    <section class="panel" id="sumPanel">
+      <div class="summary">
+        <span class="big" id="total">–</span><span class="sub" id="totalSub">טיקטים</span>
+        <span class="badge" id="modeBadge" hidden></span>
+        <div class="toolbar">
+          <span class="flabel">מיון</span>
+          <select id="sort">
+            <option value="relevance">רלוונטיות</option><option value="newest">חדש ← ישן</option>
+            <option value="oldest">ישן ← חדש</option><option value="updated">עודכן לאחרונה</option>
+          </select>
+        </div>
+      </div>
+      <div class="chart" id="chart"></div>
+      <div class="legend"><span><i style="background:var(--accent);opacity:.45"></i>נפתחו</span><span><i style="background:var(--open)"></i>עדיין פתוחים</span><span id="unit"></span></div>
+    </section>
+    <section class="results" id="results"></section>
+    <button class="btn more" id="more" hidden>טען עוד</button>
+  </main>
+</div>
+
+<!-- drawer -->
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer"><div class="dh" id="dh"></div><div class="db" id="dbody"></div></aside>
+
+<!-- sync modal -->
+<div class="modal" id="modal">
+  <div class="mbox">
+    <div class="mh"><h2>סנכרון מ-ServiceNow</h2><button class="x" data-close>×</button></div>
+    <div class="mb">
+      <div class="muted" id="connInfo" style="margin-bottom:12px"></div>
+      <div class="box">
+        <h4>1 · בדיקת חיבור</h4>
+        <div class="row"><button class="btn" id="btnTest">בדוק חיבור והרשאות</button><span id="testOut" class="muted"></span></div>
+      </div>
+      <div class="box">
+        <h4>2 · משיכה לפי טווח תאריכים</h4>
+        <div class="row">
+          <label>מתאריך <input type="date" id="sFrom"></label>
+          <label>עד <input type="date" id="sTo"></label>
+        </div>
+        <div class="row">
+          <label><input type="radio" name="sField" value="created" checked> טיקטים שנפתחו בטווח</label>
+          <label><input type="radio" name="sField" value="updated"> טיקטים שעודכנו בטווח</label>
+        </div>
+        <div class="row" id="sTables"></div>
+        <div class="row"><button class="btn primary" id="btnFull">התחל משיכה</button>
+          <button class="btn" id="btnInc" title="מושך רק טיקטים שהשתנו מאז הסנכרון האחרון">עדכון מהיר (רק שינויים)</button></div>
+      </div>
+      <div id="syncBox" hidden>
+        <div class="row" style="justify-content:space-between;margin:0"><b id="syncTitle">מסנכרן…</b><span class="muted" id="syncCount"></span></div>
+        <div class="prog" id="prog"><i></i></div>
+        <div class="log" id="log"></div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script type="module" src="/js/app.js"></script>
+</body>
+</html>

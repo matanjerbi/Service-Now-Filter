@@ -1,0 +1,28 @@
+[project]
+name = "ticket-radar"
+version = "2.0.0"
+description = "Local ServiceNow ticket explorer: sync, full-text search, team breakdown"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []          # standard library only – runs on closed networks without pip
+
+[project.scripts]
+ticket-radar = "ticket_radar.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["ticket_radar*"]
+
+[tool.setuptools.package-data]
+"ticket_radar.web" = ["static/**/*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+ignore = ["RUF001", "RUF002", "RUF003"]   # Hebrew text is intentional

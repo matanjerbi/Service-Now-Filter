@@ -1,71 +1,67 @@
 # Ticket Radar: חיפוש וניתוח טיקטים מ-ServiceNow
 
-כלי מקומי שמושך טיקטים מ-ServiceNow לפי טווח תאריכים ושומר אותם במסד נתונים מקומי (SQLite). מעליו יש ממשק בעברית עם:
+כלי מקומי שמושך טיקטים מ-ServiceNow לפי טווח תאריכים ושומר אותם במסד נתונים מקומי (SQLite עם אינדקס חיפוש טקסט מלא). מעליו יש ממשק בעברית עם:
 
 - **חיפוש חכם**: מדביקים הודעת שגיאה או תיאור תקלה ומקבלים טיקטים דומים מדורגים לפי רלוונטיות. אם אין טיקט שמכיל את כל המילים, הכלי עובר לבד למצב "דומה".
 - **חלוקה לצוותים**: לכל צוות מוצגים סה"כ הטיקטים ומספר הפתוחים. לחיצה על צוות מסננת לפיו.
-- **פילטרים**: טווח תאריכים, פתוחים/סגורים, סוג טיקט (תקלה/בקשה/שינוי/בעיה) ועדיפות.
-- **גרף** של כמות הטיקטים לאורך זמן.
-- **כרטיס טיקט** עם כל הפרטים, הערות הסגירה (איך פתרו), קישור ישיר ל-ServiceNow ורשימת טיקטים דומים.
-- **ייצוא ל-CSV** של התוצאות הנוכחיות. הקובץ נפתח ב-Excel עם עברית תקינה.
+- **פילטרים**: טווח תאריכים, פתוחים/סגורים, סוג טיקט ועדיפות. יש גם גרף לאורך זמן.
+- **כרטיס טיקט** עם הערות הסגירה, קישור ל-ServiceNow ורשימת טיקטים דומים.
+- **ייצוא ל-CSV**, שנפתח ב-Excel עם עברית תקינה.
 
-הכלי לא דורש התקנות: צריך רק Python 3.8 ומעלה, בלי `pip install` ובלי שום חבילה חיצונית. הממשק לא טוען כלום מהאינטרנט, כך שהוא עובד גם ברשת סגורה. השרת מאזין רק ל-`127.0.0.1`, כלומר רק למחשב שלך.
+**דרישות:** Python 3.11 ומעלה. אין תלויות חיצוניות (בלי `pip install`), והממשק לא טוען כלום מהאינטרנט, כך שהכלי מתאים לרשת סגורה.
 
 ## התחלה מהירה
 
 ```bash
-# 1. להציץ בממשק עם נתוני דמו (בלי ServiceNow):
-python app.py --demo
+python run.py serve --demo        # להציץ בממשק עם נתוני דמו, בלי ServiceNow
 
-# 2. עבודה אמיתית:
-cp .env.example .env        # ולמלא את הפרטים בקובץ .env
-python app.py
+cp .env.example .env              # ולמלא SN_INSTANCE / SN_USERNAME
+export SN_PASSWORD='...'          # ב-PowerShell:  $env:SN_PASSWORD='...'
+python run.py check               # בדיקת חיבור והרשאות
+python run.py                     # הפעלת הממשק: http://127.0.0.1:8765
 ```
 
-הדפדפן נפתח לבד בכתובת `http://127.0.0.1:8765`. משם לוחצים על **סנכרון**, אחר כך על **בדוק חיבור**, בוחרים טווח תאריכים ולוחצים על **התחל משיכה**.
-אחרי המשיכה הראשונה מספיק ללחוץ על **עדכון מהיר**, שמושך רק טיקטים שהשתנו מאז.
+בממשק לוחצים על **סנכרון** ובוחרים טווח תאריכים. אחרי המשיכה הראשונה מספיק ללחוץ על **עדכון מהיר**, שמושך רק טיקטים שנוצרו או השתנו מאז.
 
-## הגדרות: רק משתני סביבה, בלי לגעת בקוד
+## פקודות
 
-כל ההגדרות נקראות ממשתני סביבה. כדי שיהיה נוח, אפשר לשים אותן בקובץ `.env` ליד `app.py`. כל משתנה עם הסבר מופיע ב-`.env.example`.
-סדר העדיפויות: **משתנה סביבה אמיתי > קובץ `.env` > ברירת מחדל**. הקובץ `.env` לא עולה ל-git.
-
-| משתנה | הסבר |
+| פקודה | מה היא עושה |
 |---|---|
-| `SN_INSTANCE` | **חובה.** כתובת ה-ServiceNow |
-| `SN_AUTH_TYPE` | `basic` (משתמש וסיסמה, ברירת מחדל), `api_key`, `oauth` או `bearer` |
-| `SN_USERNAME` / `SN_PASSWORD` | משתמש וסיסמה |
-| `SN_API_KEY` | עבור `api_key`. נשלח ב-header בשם `x-sn-apikey` |
-| `SN_CLIENT_ID` / `SN_CLIENT_SECRET` | עבור `oauth` |
-| `SN_TABLES` | טבלאות מופרדות בפסיק. ברירת המחדל: `incident,sc_req_item,change_request,problem` |
-| `SN_SCOPE` | `all`: כל מה שמותר לראות. `my_groups`: הקבוצות של המשתמש. `groups`: רשימה קבועה |
-| `SN_SCOPE_GROUPS` | עבור `groups`: שמות צוותים מופרדים בפסיק |
-| `SN_SCOPE_USER` | עבור `my_groups` כשעובדים עם משתמש שירות: שם המשתמש שלך, כדי שייבחרו **הצוותים שלך** |
-| `SN_INCLUDE_JOURNAL` | `true` מושך גם הערות ו-work notes |
-| `SN_EXTRA_QUERY` | encoded query נוסף, למשל `priority<=3` |
-| `SN_CA_BUNDLE` / `SN_VERIFY_SSL` | קובץ CA ארגוני (PEM) לרשת עם תעודות פנימיות |
-| `SN_DATE_QUERY_STYLE` | `script` (ברירת מחדל). אם המשיכה מחזירה 0 טיקטים, נסה `plain` |
-| `SN_TIMEOUT` / `SN_PAGE_SIZE` | זמן המתנה לבקשה, וכמה רשומות לבקש בכל קריאה |
-| `TR_HOST` / `TR_PORT` / `TR_DB_PATH` | הגדרות השרת המקומי. `TR_HOST=0.0.0.0` הופך אותו לנגיש מהרשת, **בלי סיסמה** |
+| `python run.py` / `serve` | הפעלת הממשק. אפשרויות: `--demo`, `--host`, `--port`, `--no-browser` |
+| `python run.py sync --from 2026-01-01 --to 2026-11-30` | משיכה לפי טווח. `--by-updated` מסנן לפי תאריך עדכון במקום פתיחה |
+| `python run.py sync --incremental` | רק שינויים מאז הסנכרון האחרון. מתאים להרצה מתוזמנת (cron / Task Scheduler) |
+| `python run.py check` | בדיקת חיבור והרשאות לכל טבלה |
+| `python run.py config` | הצגת ההגדרות שבתוקף, עם סודות מוסתרים |
 
-אם הארגון עובר דרך פרוקסי, משתמשים במשתני הסביבה הרגילים `HTTPS_PROXY` / `NO_PROXY`.
+## הגדרות: משתני סביבה
 
-**סיסמאות ומפתחות:** עדיף לא לשמור אותם בקובץ `.env` אלא להגדיר אותם בטרמינל לפני ההרצה:
+כל ההגדרות נקראות ממשתני סביבה, או מקובץ `.env` ליד `run.py`. כל משתנה עם הסבר מופיע ב-`.env.example`.
+סדר העדיפויות: **משתנה סביבה > `.env` > ברירת מחדל**. הקובץ `.env` לא עולה ל-git.
 
-```bash
-export SN_PASSWORD='...'          # Linux
-$env:SN_PASSWORD='...'            # Windows PowerShell
-```
+| משתנה | ברירת מחדל | הסבר |
+|---|---|---|
+| `SN_INSTANCE` | (חובה) | כתובת ה-ServiceNow |
+| `SN_AUTH_TYPE` | `basic` | `basic` / `api_key` / `oauth` / `bearer` |
+| `SN_USERNAME`, `SN_PASSWORD` | | עבור `basic`, וגם עבור `oauth` עם password grant |
+| `SN_API_KEY` | | עבור `api_key`. נשלח ב-header בשם `x-sn-apikey` |
+| `SN_CLIENT_ID`, `SN_CLIENT_SECRET` | | עבור `oauth` |
+| `SN_TOKEN` | | עבור `bearer` |
+| `SN_TABLES` | `incident,sc_req_item,change_request,problem` | |
+| `SN_SCOPE` | `all` | `all` / `my_groups` / `groups` |
+| `SN_SCOPE_GROUPS` | | עבור `groups`: שמות צוותים מופרדים בפסיק |
+| `SN_SCOPE_USER` | | עבור `my_groups` עם משתמש שירות: שם המשתמש שלך |
+| `SN_INCLUDE_JOURNAL` | `false` | למשוך גם הערות ו-work notes |
+| `SN_EXTRA_QUERY` | | encoded query נוסף, למשל `priority<=3` |
+| `SN_CA_BUNDLE` | | קובץ CA ארגוני (PEM) |
+| `SN_VERIFY_SSL` | `true` | |
+| `SN_DATE_QUERY_STYLE` | `script` | אם המשיכה מחזירה 0 טיקטים, נסה `plain` |
+| `SN_TIMEOUT`, `SN_PAGE_SIZE` | `60`, `500` | |
+| `TR_HOST`, `TR_PORT` | `127.0.0.1`, `8765` | `0.0.0.0` הופך את הממשק לנגיש מהרשת, **בלי סיסמה** |
+| `TR_DB_PATH` | `tickets.db` | נתיב יחסי מחושב מתיקיית הפרויקט |
 
-**בדיקת הגדרות:** `python app.py --show-config` מדפיס את ההגדרות שבתוקף, עם סודות מוסתרים.
+אם הארגון עובר דרך פרוקסי, משתמשים במשתנים הרגילים `HTTPS_PROXY` / `NO_PROXY`.
 
-**מעבר ל-API key:** משנים את `SN_AUTH_TYPE=api_key` ומגדירים `SN_API_KEY`. הטיקטים שכבר נמשכו נשארים במאגר.
-
-## הרשאות נדרשות ב-ServiceNow
-
-מספיקה **קריאה** בלבד (read) על הטבלאות שבחרת. לרוב ה-role `itil` מכסה את זה.
-עבור `SN_SCOPE=my_groups` צריך גם הרשאת קריאה ל-`sys_user_grmember`.
-כדאי לבקש מצוות ה-ServiceNow משתמש שירות ייעודי עם הרשאות קריאה בלבד.
+**הרשאות ב-ServiceNow:** מספיקה קריאה בלבד על הטבלאות, לרוב דרך ה-role `itil`. עבור `my_groups` צריך גם הרשאת קריאה ל-`sys_user_grmember`. אם ההתחברות ל-ServiceNow עוברת דרך SSO, צריך משתמש מקומי או API key.
 
 ## טיפים לחיפוש
 
@@ -73,22 +69,42 @@ $env:SN_PASSWORD='...'            # Windows PowerShell
 - `redis -latency`: כל הטיקטים עם redis, חוץ מאלה שמופיעה בהם המילה latency
 - `INC0012345`: קפיצה ישירה למספר טיקט
 - בעברית, אותיות השימוש בתחילת מילה לא משנות את התוצאה: חיפוש "שרת" ימצא גם "לשרתים"
-- **חכם**: קודם מחפש טיקטים שמכילים את כל המילים, ואם אין כאלה עובר לדירוג לפי דמיון
 - הסינונים נשמרים בכתובת ה-URL, כך שאפשר לשמור חיפוש כסימנייה
 
-## סנכרון אוטומטי (cron / Task Scheduler)
+## מבנה הפרויקט
 
-```bash
-python app.py --sync --incremental                        # רק שינויים מאז הפעם הקודמת
-python app.py --sync --from 2026-01-01 --to 2026-11-30    # משיכה לפי טווח
+```
+run.py                      נקודת כניסה
+ticket_radar/
+  cli.py                    פקודות שורת הפקודה
+  config.py                 הגדרות: dataclasses שנטענים ממשתני סביבה ומ-.env
+  app.py                    חיבור הרכיבים (DB, חיפוש, סנכרון, web)
+  demo.py                   נתוני דמו
+  servicenow/
+    client.py               Table API: דפדוף, ניסיונות חוזרים, SSL, פרוקסי
+    auth.py                 Basic / API key / OAuth / Bearer
+    models.py               Ticket והמרה מרשומת API
+    queries.py              בניית encoded queries
+    errors.py
+  storage/
+    database.py             סכמת SQLite ואינדקס FTS5
+    repository.py           שמירה ושליפה של טיקטים
+  search/
+    query_parser.py         תחביר החיפוש → ביטויי FTS5
+    hebrew.py               נרמול עברית (תחיליות וסיומות)
+    filters.py              פילטרים → SQL
+    engine.py               חיפוש מדורג, facets, טיקטים דומים, ייצוא
+  sync/
+    service.py              סנכרון מלא או מהיר, היקף צוותים, מעקב התקדמות
+  web/
+    server.py               שרת HTTP, ניתוב, קבצים סטטיים
+    api.py                  JSON API
+    static/                 index.html, css/, js/ (ES modules, בלי build)
+tests/                      unittest, כולל שרת ServiceNow מדומה
 ```
 
-## קבצים
+## טסטים
 
-- `app.py`: השרת המקומי, הסנכרון וטעינת ההגדרות
-- `.env.example`: תבנית ההגדרות. מעתיקים אותה ל-`.env`
-- `sn_client.py`: הלקוח של ServiceNow (הזדהות, דפדוף בין עמודים, ניסיונות חוזרים)
-- `db.py`: מסד הנתונים והחיפוש (SQLite FTS5)
-- `static/index.html`: הממשק
-- `demo.py`: יוצר נתוני דמו
-- `tickets.db`: הנתונים שנמשכו (נוצר אוטומטית). **לא להעלות ל-git**
+```bash
+python -m unittest discover -s tests -t .
+```
