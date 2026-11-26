@@ -1,4 +1,5 @@
 config.json
+.env
 *.db
 *.db-*
 __pycache__/

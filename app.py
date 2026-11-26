@@ -33,16 +33,96 @@ TABLE_LABELS = {"incident": "תקלה", "sc_req_item": "בקשה", "sc_task": "�
 
 
 # ---------------------------------------------------------------- config
-def load_config(path):
+# Every setting can come from an environment variable (or a .env file next to app.py).
+# Priority: real environment > .env file > config.json (optional) > defaults.
+_LIST = lambda v: [x.strip() for x in v.replace("|", ",").split(",") if x.strip()]  # noqa: E731
+_BOOL = lambda v: v.strip().lower() not in ("0", "false", "no", "off", "")  # noqa: E731
+ENV_MAP = [
+    # env var               config path                  parser
+    ("SN_INSTANCE",         ("instance",),               str),
+    ("SN_AUTH_TYPE",        ("auth", "type"),            str),
+    ("SN_USERNAME",         ("auth", "username"),        str),
+    ("SN_PASSWORD",         ("auth", "password"),        str),
+    ("SN_API_KEY",          ("auth", "api_key"),         str),
+    ("SN_CLIENT_ID",        ("auth", "client_id"),       str),
+    ("SN_CLIENT_SECRET",    ("auth", "client_secret"),   str),
+    ("SN_TOKEN",            ("auth", "token"),           str),
+    ("SN_TABLES",           ("tables",),                 _LIST),
+    ("SN_SCOPE",            ("scope", "mode"),           str),
+    ("SN_SCOPE_GROUPS",     ("scope", "groups"),         _LIST),
+    ("SN_SCOPE_USER",       ("scope", "user"),           str),
+    ("SN_INCLUDE_JOURNAL",  ("include_journal",),        _BOOL),
+    ("SN_EXTRA_QUERY",      ("extra_query",),            str),
+    ("SN_DATE_QUERY_STYLE", ("date_query_style",),       str),
+    ("SN_PAGE_SIZE",        ("page_size",),              int),
+    ("SN_TIMEOUT",          ("timeout",),                int),
+    ("SN_VERIFY_SSL",       ("verify_ssl",),             _BOOL),
+    ("SN_CA_BUNDLE",        ("ca_bundle",),              str),
+    ("TR_HOST",             ("host",),                   str),
+    ("TR_PORT",             ("port",),                   int),
+    ("TR_DB_PATH",          ("db_path",),                str),
+]
+
+
+def load_dotenv(path):
+    """Minimal .env loader: KEY=VALUE lines, # comments, optional quotes. Never overrides
+    variables that are already set in the real environment."""
     if not os.path.exists(path):
-        return None
-    with open(path, encoding="utf-8") as fh:
-        cfg = json.load(fh)
+        return []
+    loaded = []
+    with open(path, encoding="utf-8-sig") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            if line.lower().startswith("export "):
+                line = line[7:]
+            k, v = line.split("=", 1)
+            k, v = k.strip(), v.strip()
+            if len(v) >= 2 and v[0] == v[-1] and v[0] in "'\"":
+                v = v[1:-1]
+            elif " #" in v:
+                v = v.split(" #", 1)[0].rstrip()
+            if k and k not in os.environ:
+                os.environ[k] = v
+                loaded.append(k)
+    return loaded
+
+
+def load_config(path=None):
+    cfg = {}
+    if path and os.path.exists(path):
+        with open(path, encoding="utf-8") as fh:
+            cfg = json.load(fh)
+    for env, keys, parse in ENV_MAP:
+        raw = os.environ.get(env)
+        if raw is None or raw == "":
+            continue
+        try:
+            val = parse(raw)
+        except ValueError:
+            raise SystemExit(f"ערך לא תקין במשתנה {env}: {raw!r}")
+        node = cfg
+        for k in keys[:-1]:
+            node = node.setdefault(k, {})
+        node[keys[-1]] = val
+    cfg.setdefault("auth", {}).setdefault("type", "basic")
     cfg.setdefault("tables", DEFAULT_TABLES)
-    cfg.setdefault("scope", {"mode": "all"})
+    cfg.setdefault("scope", {}).setdefault("mode", "all")
+    cfg.setdefault("host", "127.0.0.1")
     cfg.setdefault("port", 8765)
     cfg.setdefault("db_path", "tickets.db")
     return cfg
+
+
+def config_summary(cfg):
+    """Safe-to-print view of the effective config (secrets masked)."""
+    auth = cfg.get("auth", {})
+    secrets = [k for k in ("password", "api_key", "client_secret", "token") if auth.get(k)]
+    return (f"instance={cfg.get('instance') or '(חסר!)'}  auth={auth.get('type')}"
+            f"{' user=' + auth['username'] if auth.get('username') else ''}"
+            f"  secrets={','.join(secrets) or '(אין!)'}  scope={cfg['scope'].get('mode')}"
+            f"  tables={','.join(cfg['tables'])}")
 
 
 def sn_date(d, t):
@@ -73,12 +153,17 @@ def scope_clause(client, cfg, log):
         log("היקף: כל הטיקטים שהמשתמש מורשה לראות")
         return ""
     if mode == "my_groups":
-        groups = client.my_groups()
-        if not groups and (cfg.get("auth") or {}).get("username"):
-            groups = client.my_groups(cfg["auth"]["username"])
+        user = scope.get("user")
+        if user:  # e.g. a service account looking up *your* groups
+            groups = client.my_groups(user)
+        else:
+            groups = client.my_groups()
+            if not groups and (cfg.get("auth") or {}).get("username"):
+                groups = client.my_groups(cfg["auth"]["username"])
         if not groups:
-            raise SNError("לא נמצאו קבוצות שאתה חבר בהן (sys_user_grmember). נסה scope.mode = all")
-        log("היקף: הקבוצות שלי – " + ", ".join(n for _, n in groups))
+            raise SNError("לא נמצאו קבוצות (sys_user_grmember) עבור "
+                          f"{user or 'המשתמש המחובר'}. הגדר SN_SCOPE_USER או SN_SCOPE=all")
+        log(f"היקף: הקבוצות של {user or 'המשתמש המחובר'} – " + ", ".join(n for _, n in groups))
         return "assignment_groupIN" + ",".join(i for i, _ in groups)
     if mode == "groups":
         names = scope.get("groups") or []
@@ -289,7 +374,7 @@ def make_handler(app):
                     for r in dbm.export_rows(conn, f, q, mode, sort, app.fts):
                         w.writerow([(r[c] or "") for c in cols])
                     conn.close()
-                    body = ("﻿" + buf.getvalue()).encode("utf-8")
+                    body = ("\ufeff" + buf.getvalue()).encode("utf-8")
                     name = "tickets_" + datetime.now().strftime("%Y%m%d_%H%M") + ".csv"
                     self.send_response(200)
                     self.send_header("Content-Type", "text/csv; charset=utf-8")
@@ -306,12 +391,12 @@ def make_handler(app):
         def do_POST(self):
             try:
                 u = urlparse(self.path)
-                if self.headers.get("Origin") and not self.headers["Origin"].startswith(
-                        ("http://127.0.0.1", "http://localhost")):
+                origin = self.headers.get("Origin")
+                if origin and origin.split("://", 1)[-1] != (self.headers.get("Host") or ""):
                     return self.send_json({"error": "forbidden origin"}, 403)
                 if u.path in ("/api/sync", "/api/test") and (app.demo or not app.cfg):
                     return self.send_json({"error": "במצב דמו אין חיבור ל-ServiceNow. "
-                                                    "הגדר config.json והפעל בלי --demo."}, 400)
+                                                    "הגדר SN_INSTANCE (.env) והפעל בלי --demo."}, 400)
                 if u.path == "/api/test":
                     client = ServiceNowClient(app.cfg)
                     out = []
@@ -340,11 +425,15 @@ def make_handler(app):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Ticket Radar – ServiceNow ticket explorer")
-    ap.add_argument("--config", default=os.path.join(HERE, "config.json"))
+    ap = argparse.ArgumentParser(description="Ticket Radar – ServiceNow ticket explorer. "
+                                 "All settings come from environment variables / .env (see .env.example).")
+    ap.add_argument("--env-file", default=os.path.join(HERE, ".env"), help="path to .env file")
+    ap.add_argument("--config", default=os.path.join(HERE, "config.json"), help="optional JSON config")
     ap.add_argument("--demo", action="store_true", help="run with generated demo data")
+    ap.add_argument("--host", help="bind address (default 127.0.0.1)")
     ap.add_argument("--port", type=int)
     ap.add_argument("--no-browser", action="store_true")
+    ap.add_argument("--show-config", action="store_true", help="print effective config (secrets masked)")
     ap.add_argument("--sync", action="store_true", help="run a sync from the command line and exit")
     ap.add_argument("--from", dest="d_from")
     ap.add_argument("--to", dest="d_to")
@@ -352,7 +441,14 @@ def main():
     ap.add_argument("--by-updated", action="store_true", help="date range applies to sys_updated_on")
     args = ap.parse_args()
 
-    cfg = None if args.demo else load_config(args.config)
+    loaded = load_dotenv(args.env_file)
+    cfg = load_config(args.config)
+    if loaded:
+        print(f"נטענו {len(loaded)} משתנים מ-{os.path.basename(args.env_file)}")
+    if args.show_config:
+        print(config_summary(cfg))
+        sys.exit(0)
+
     if args.demo:
         db_path = os.path.join(HERE, "demo.db")
         if not os.path.exists(db_path):
@@ -360,37 +456,42 @@ def main():
             dbm.init(db_path)
             demo.generate(db_path)
     else:
-        if not cfg:
-            print(f"לא נמצא {args.config}. העתק את config.example.json ל-config.json ומלא פרטים,\n"
-                  f"או הרץ עם --demo כדי לראות את הממשק עם נתוני דוגמה.")
+        if not cfg.get("instance"):
+            print("לא הוגדר SN_INSTANCE.\n"
+                  "העתק את .env.example ל-.env ומלא את הפרטים (או הגדר משתני סביבה),\n"
+                  "או הרץ עם --demo כדי לראות את הממשק עם נתוני דוגמה.")
             sys.exit(1)
         db_path = cfg["db_path"]
         if not os.path.isabs(db_path):
             db_path = os.path.join(HERE, db_path)
+        print(config_summary(cfg))
 
-    app = App(cfg, db_path, demo=args.demo)
+    app = App(None if args.demo else cfg, db_path, demo=args.demo)
 
     if args.sync:
-        if not cfg:
-            sys.exit("--sync דורש config.json")
+        if args.demo:
+            sys.exit("--sync לא זמין במצב דמו")
         p = {"mode": "incremental" if args.incremental else "full", "from": args.d_from,
              "to": args.d_to, "field": "updated" if args.by_updated else "created"}
         run_sync(cfg, db_path, p, app.sync)
         sys.exit(1 if app.sync.snapshot()["error"] else 0)
 
-    port = args.port or (cfg or {}).get("port", 8765)
+    host = args.host or cfg.get("host", "127.0.0.1")
+    port = args.port or cfg.get("port", 8765)
     server = None
     for p in range(port, port + 20):
         try:
-            server = ThreadingHTTPServer(("127.0.0.1", p), make_handler(app))
+            server = ThreadingHTTPServer((host, p), make_handler(app))
             port = p
             break
         except OSError:
             continue
     if not server:
         sys.exit("לא נמצא פורט פנוי")
-    url = f"http://127.0.0.1:{port}/"
+    url = f"http://{'127.0.0.1' if host in ('0.0.0.0', '') else host}:{port}/"
     print(f"Ticket Radar פועל: {url}   ({'דמו' if args.demo else cfg.get('instance')})")
+    if host not in ("127.0.0.1", "localhost"):
+        print(f"שים לב: השרת מאזין על {host} – נגיש ממחשבים אחרים ברשת, בלי סיסמה.")
     print("לעצירה: Ctrl+C")
     if not args.no_browser:
         threading.Timer(0.8, lambda: webbrowser.open(url)).start()

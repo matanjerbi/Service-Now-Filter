@@ -18,36 +18,53 @@
 python app.py --demo
 
 # 2. עבודה אמיתית:
-cp config.example.json config.json      # ולמלא את הפרטים
+cp .env.example .env        # ולמלא את הפרטים בקובץ .env
 python app.py
 ```
 
 הדפדפן נפתח לבד בכתובת `http://127.0.0.1:8765`. משם לוחצים על **סנכרון**, אחר כך על **בדוק חיבור**, בוחרים טווח תאריכים ולוחצים על **התחל משיכה**.
 אחרי המשיכה הראשונה מספיק ללחוץ על **עדכון מהיר**, שמושך רק טיקטים שהשתנו מאז.
 
-## config.json
+## הגדרות: רק משתני סביבה, בלי לגעת בקוד
 
-| שדה | הסבר |
+כל ההגדרות נקראות ממשתני סביבה. כדי שיהיה נוח, אפשר לשים אותן בקובץ `.env` ליד `app.py`. כל משתנה עם הסבר מופיע ב-`.env.example`.
+סדר העדיפויות: **משתנה סביבה אמיתי > קובץ `.env` > ברירת מחדל**. הקובץ `.env` לא עולה ל-git.
+
+| משתנה | הסבר |
 |---|---|
-| `instance` | כתובת ה-ServiceNow, למשל `https://company.service-now.com` |
-| `auth.type` | `basic` (משתמש וסיסמה), `oauth`, `api_key` או `bearer` |
-| `auth.username` / `auth.password` | משתמש שירות. אפשר להשאיר את הסיסמה ריקה ולהעביר אותה במשתנה סביבה `SN_PASSWORD` |
-| `auth.client_id` / `auth.client_secret` | עבור `oauth`. מקבלים אותם מה-Application Registry ב-ServiceNow |
-| `auth.api_key` | עבור `api_key`. נשלח ב-header בשם `x-sn-apikey` |
-| `tables` | מאילו טבלאות למשוך. ברירת המחדל היא `incident`, `sc_req_item`, `change_request` ו-`problem`. אפשר להוסיף גם `sc_task` |
-| `scope.mode` | `all`: כל מה שההרשאות שלך מאפשרות לראות. `my_groups`: רק הקבוצות שאתה חבר בהן. `groups`: רשימה מפורשת שמגדירים ב-`scope.groups`, למשל `["DBA - Redis","Network"]` |
-| `include_journal` | `true` מושך גם הערות ו-work notes. החיפוש משתפר, אבל המשיכה איטית יותר |
-| `extra_query` | encoded query נוסף, למשל `priority<=2` |
-| `date_query_style` | `script` (ברירת מחדל, משתמש ב-`gs.dateGenerate`). אם ה-instance חוסם את זה, משנים ל-`plain` |
-| `verify_ssl` / `ca_bundle` | לרשת ארגונית עם CA פנימי: נותנים את הנתיב לקובץ ה-CA ב-`ca_bundle` |
-| `page_size` | כמה רשומות לבקש בכל קריאה (500 זה ערך סביר) |
+| `SN_INSTANCE` | **חובה.** כתובת ה-ServiceNow |
+| `SN_AUTH_TYPE` | `basic` (משתמש וסיסמה, ברירת מחדל), `api_key`, `oauth` או `bearer` |
+| `SN_USERNAME` / `SN_PASSWORD` | משתמש וסיסמה |
+| `SN_API_KEY` | עבור `api_key`. נשלח ב-header בשם `x-sn-apikey` |
+| `SN_CLIENT_ID` / `SN_CLIENT_SECRET` | עבור `oauth` |
+| `SN_TABLES` | טבלאות מופרדות בפסיק. ברירת המחדל: `incident,sc_req_item,change_request,problem` |
+| `SN_SCOPE` | `all`: כל מה שמותר לראות. `my_groups`: הקבוצות של המשתמש. `groups`: רשימה קבועה |
+| `SN_SCOPE_GROUPS` | עבור `groups`: שמות צוותים מופרדים בפסיק |
+| `SN_SCOPE_USER` | עבור `my_groups` כשעובדים עם משתמש שירות: שם המשתמש שלך, כדי שייבחרו **הצוותים שלך** |
+| `SN_INCLUDE_JOURNAL` | `true` מושך גם הערות ו-work notes |
+| `SN_EXTRA_QUERY` | encoded query נוסף, למשל `priority<=3` |
+| `SN_CA_BUNDLE` / `SN_VERIFY_SSL` | קובץ CA ארגוני (PEM) לרשת עם תעודות פנימיות |
+| `SN_DATE_QUERY_STYLE` | `script` (ברירת מחדל). אם המשיכה מחזירה 0 טיקטים, נסה `plain` |
+| `SN_TIMEOUT` / `SN_PAGE_SIZE` | זמן המתנה לבקשה, וכמה רשומות לבקש בכל קריאה |
+| `TR_HOST` / `TR_PORT` / `TR_DB_PATH` | הגדרות השרת המקומי. `TR_HOST=0.0.0.0` הופך אותו לנגיש מהרשת, **בלי סיסמה** |
 
 אם הארגון עובר דרך פרוקסי, משתמשים במשתני הסביבה הרגילים `HTTPS_PROXY` / `NO_PROXY`.
+
+**סיסמאות ומפתחות:** עדיף לא לשמור אותם בקובץ `.env` אלא להגדיר אותם בטרמינל לפני ההרצה:
+
+```bash
+export SN_PASSWORD='...'          # Linux
+$env:SN_PASSWORD='...'            # Windows PowerShell
+```
+
+**בדיקת הגדרות:** `python app.py --show-config` מדפיס את ההגדרות שבתוקף, עם סודות מוסתרים.
+
+**מעבר ל-API key:** משנים את `SN_AUTH_TYPE=api_key` ומגדירים `SN_API_KEY`. הטיקטים שכבר נמשכו נשארים במאגר.
 
 ## הרשאות נדרשות ב-ServiceNow
 
 מספיקה **קריאה** בלבד (read) על הטבלאות שבחרת. לרוב ה-role `itil` מכסה את זה.
-עבור `scope.mode = my_groups` צריך גם הרשאת קריאה ל-`sys_user_grmember`.
+עבור `SN_SCOPE=my_groups` צריך גם הרשאת קריאה ל-`sys_user_grmember`.
 כדאי לבקש מצוות ה-ServiceNow משתמש שירות ייעודי עם הרשאות קריאה בלבד.
 
 ## טיפים לחיפוש
@@ -68,7 +85,8 @@ python app.py --sync --from 2026-01-01 --to 2026-11-30    # משיכה לפי ט
 
 ## קבצים
 
-- `app.py`: השרת המקומי והסנכרון
+- `app.py`: השרת המקומי, הסנכרון וטעינת ההגדרות
+- `.env.example`: תבנית ההגדרות. מעתיקים אותה ל-`.env`
 - `sn_client.py`: הלקוח של ServiceNow (הזדהות, דפדוף בין עמודים, ניסיונות חוזרים)
 - `db.py`: מסד הנתונים והחיפוש (SQLite FTS5)
 - `static/index.html`: הממשק
