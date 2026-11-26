@@ -1,0 +1,23 @@
+{
+  "instance": "https://yourcompany.service-now.com",
+
+  "auth": {
+    "type": "basic",
+    "username": "svc_ticket_radar",
+    "password": ""
+  },
+
+  "tables": ["incident", "sc_req_item", "change_request", "problem"],
+
+  "scope": { "mode": "all" },
+
+  "include_journal": false,
+  "extra_query": "",
+  "date_query_style": "script",
+  "page_size": 500,
+  "timeout": 60,
+  "verify_ssl": true,
+  "ca_bundle": "",
+  "port": 8765,
+  "db_path": "tickets.db"
+}
